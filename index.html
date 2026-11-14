@@ -154,7 +154,35 @@ async function activateLocalGate(){if(gateGet())return alert('حالت ورود 
 const oldExport=exportData;
 exportData=async function(){if(!gateGet())return oldExport();try{let pass=prompt('برای رمزگذاری فایل بکاپ، یک رمز حداقل ۱۰ کاراکتری تعیین کنید:');if(pass===null)return;if(pass.length<10)throw Error('رمز بکاپ باید حداقل ۱۰ کاراکتر باشد');let salt=rand(16),key=await derivePassword(pass,salt),payload=await aesEncrypt(key,enc.encode(JSON.stringify(data)));downloadJSON({format:'roozara-local-encrypted-backup',version:1,salt:b64(salt),payload},'roozara-backup-'+new Date().toISOString().slice(0,10)+'.json');alert('بکاپ رمزگذاری‌شده تهیه شد')}catch(e){alert(e.message)}};
 const oldImport=importData;
-importData=async function(e){if(!gateGet())return oldImport(e);let f=e.target.files?.[0];if(!f)return;try{let v=JSON.parse(await f.text());if(v.format!=='roozara-local-encrypted-backup')throw Error('در حالت محلی فقط بکاپ رمزگذاری‌شده همین نسخه قابل بازیابی است');let pass=prompt('رمز بکاپ را وارد کنید');if(pass===null)return;let k=await derivePassword(pass,unb64(v.salt));let recovered=JSON.parse(dec.decode(await aesDecrypt(k,v.payload)));if(!Array.isArray(recovered.categories)||!Array.isArray(recovered.tasks))throw Error('فایل نامعتبر');if(!confirm('اطلاعات فعلی جایگزین شود؟'))return;data=recovered;await plainPut(data);render();alert('بازیابی انجام شد')}catch(err){alert('بازیابی ناموفق: '+err.message)}finally{e.target.value=''}};
+importData=async function(e){
+ const f=e.target.files?.[0];if(!f)return;
+ try{
+  const v=JSON.parse(await f.text());
+  if(v.format==='roozara-local-encrypted-backup'&&v.version===1){
+   if(!v.salt||!v.payload?.iv||!v.payload?.ct)throw Error('ساختار بکاپ رمزگذاری‌شده ناقص است');
+   const pass=prompt('رمز عبوری که هنگام تهیه این بکاپ تعیین کرده‌اید را وارد کنید:');
+   if(pass===null)return;
+   let recovered;
+   try{const k=await derivePassword(pass,unb64(v.salt));recovered=JSON.parse(dec.decode(await aesDecrypt(k,v.payload)))}
+   catch(ex){throw Error('رمز بکاپ اشتباه است یا فایل آسیب دیده است')}
+   if(!Array.isArray(recovered.categories)||!Array.isArray(recovered.tasks))throw Error('محتوای بکاپ معتبر نیست');
+   if(!confirm('بازیابی موفقیت‌آمیز بررسی شد. تمام اطلاعات فعلی جایگزین شوند؟'))return;
+   if(gateGet()){
+    await plainPut(recovered);data=recovered;render();alert('بکاپ با موفقیت بازیابی شد');
+   }else{
+    if(!masterKey)throw Error('ابتدا وارد برنامه شوید');
+    const previous=data;data=recovered;
+    try{await persistEncrypted()}catch(ex){data=previous;throw ex}
+    render();alert('بکاپ بازیابی و در فضای رمزگذاری‌شده برنامه ذخیره شد');
+   }
+   return;
+  }
+  // Delegate all other formats to the original import handler using the same file event.
+  await oldImport(e);
+ }catch(err){alert('بازیابی ناموفق: '+(err.message||String(err)))}
+ finally{e.target.value=''}
+};
+
 const oldRender=render;
 render=function(){oldRender();if(page==='settings'){let panel=document.querySelector('.settings-panel');if(panel&&!$('localGateButton')){let btn=document.createElement('button');btn.id='localGateButton';btn.className='settings-action';btn.textContent=gateGet()?'✓ ورود بدون رمز مانند روزآرا فعال است':'🔓 فعال‌سازی ورود بدون رمز مانند روزآرا';btn.onclick=activateLocalGate;panel.append(btn);let note=document.createElement('p');note.className='note';note.textContent='هشدار: در این حالت دیتابیس محلی رمزگذاری نمی‌شود و اثر انگشت فقط قفل برنامه را باز می‌کند. برای اطلاعات حساس مناسب نیست.';panel.append(note)}refreshBiometricStatus()}};
 // Update legacy descriptions and migrate only with explicit consent.
